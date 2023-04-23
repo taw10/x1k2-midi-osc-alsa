@@ -112,7 +112,7 @@ static int led_handler(const char *path, const char *types, lo_arg **argv,
 }
 
 
-static void add_led(lo_server_thread osc_server, snd_rawmidi_t *midi_out,
+static void add_led(lo_server osc_server, snd_rawmidi_t *midi_out,
                     int led, int red, int orange, int green)
 {
 	char tmp[256];
@@ -127,7 +127,7 @@ static void add_led(lo_server_thread osc_server, snd_rawmidi_t *midi_out,
 	cb->green = green;
 
 	snprintf(tmp, 255, "/x1k2/leds/%i", led);
-	lo_server_thread_add_method(osc_server, tmp, "s", led_handler, cb);
+	lo_server_add_method(osc_server, tmp, "s", led_handler, cb);
 }
 
 
@@ -146,7 +146,8 @@ int main(int argc, char *argv[])
 	char *dev = NULL;
 	snd_rawmidi_t *midi_in;
 	snd_rawmidi_t *midi_out;
-	lo_server_thread osc_server;
+	lo_server osc_server;
+	int lo_fd;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -194,8 +195,11 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	osc_server = lo_server_thread_new("7771", error_callback);
-	lo_server_thread_start(osc_server);
+	/* Set non-blocking mode for input (read) stream only */
+	snd_rawmidi_nonblock(midi_in, 1);
+
+	osc_server = lo_server_new("7771", error_callback);
+	lo_fd = lo_server_get_socket_fd(osc_server);
 
 	for ( i=0; i<32; i++ ) {
 		add_led(osc_server, midi_out, flip_position(i),
@@ -206,14 +210,42 @@ int main(int argc, char *argv[])
 
 	do {
 
-		ssize_t r;
-		char buf[1024];
+		struct pollfd pfds[16];
+		int nfds;
+		int r;
 
-		r = snd_rawmidi_read(midi_in, buf, 1024);
-		if ( r > 0 ) {
-			printf("got %li\n", r);
+		pfds[0].fd = lo_fd;
+		pfds[0].events = POLLIN | POLLOUT;
+		pfds[0].revents = 0;
+
+		/* Add MIDI fds */
+		nfds = snd_rawmidi_poll_descriptors(midi_in, &pfds[1], 15);
+
+		r = poll(pfds, 1+nfds, 1000);
+		if ( r < 0 ) {
+			fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+		} else {
+
+			unsigned short revents;
+
+			if ( pfds[0].revents & POLLIN ) {
+				lo_server_recv_noblock(osc_server, 0);
+			}
+
+			snd_rawmidi_poll_descriptors_revents(midi_in,
+			                                     &pfds[1], nfds,
+			                                     &revents);
+
+			if ( revents & POLLIN ) {
+				ssize_t r;
+				char buf[1024];
+
+				r = snd_rawmidi_read(midi_in, buf, 1024);
+				if ( r > 0 ) {
+					printf("got %li\n", r);
+				}
+			}
 		}
-		usleep(1);
 
 	} while ( 1 );
 
