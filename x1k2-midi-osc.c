@@ -166,9 +166,39 @@ static void handle_note(int note, int vel, lo_address osc_send_addr)
 }
 
 
+static void handle_encoder(int enc, int val, lo_address osc_send_addr)
+{
+	printf("encoder %i: %i\n", enc, val);
+}
+
+
 static void handle_cc(int cc, int val, lo_address osc_send_addr)
 {
+	char tmp[32];
+	const char *type;
+	int num;
+
 	printf("CC %i = %i\n", cc, val);
+
+	if ( cc < 4 ) {
+		handle_encoder(cc+1, val, osc_send_addr);
+		return;
+	} else if ( cc<=15 ) {
+		type = "potentiometers";
+		num = cc+1;
+	} else if ( cc<=19 ) {
+		type = "faders";
+		num = cc-15;
+	} else if ( cc<=21 ) {
+		handle_encoder(cc-15, val, osc_send_addr);
+		return;
+	} else {
+		fprintf(stderr, "CC %i unrecognised!\n", cc);
+		return;
+	}
+
+	snprintf(tmp, 32, "/x1k2/%s/%i", type, num);
+	lo_send(osc_send_addr, tmp, "i", val);
 }
 
 
