@@ -12,7 +12,7 @@ something else, I gleefully encourage you to fork and modify the code.
 Installation
 ------------
 
-You will need the development files for Guile and liblo installed, as well as
+You will need the development files for ALSA and liblo installed, as well as
 [Meson](https://mesonbuild.com/).  Then:
 
 ```
@@ -27,11 +27,11 @@ OSC methods - receive
 ---------------------
 
 * `/x1k2/leds/<n> <colour>`
-  `<n>` = 1..32,101,102 (int)
-  `<colour>` = red,orange,green,off (string)
-  Turn LEDs on/off.  Numbering is from top left (1) to bottom right (32).  Top
-  right is number 4.  The two large buttons at the bottom are 101 (left) and
-  102 (right).
+  - `<n>` = 1..32,101,102 (int)
+  - `<colour>` = red,orange,green,off (string)
+  - Turn LEDs on/off.  Numbering is from top left (1) to bottom right (32).
+    Top right is number 4.  The two large buttons at the bottom are 101 (left)
+    and 102 (right).
 
 
 License
