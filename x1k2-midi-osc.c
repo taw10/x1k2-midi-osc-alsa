@@ -286,7 +286,7 @@ int main(int argc, char *argv[])
 		int r;
 
 		pfds[0].fd = lo_fd;
-		pfds[0].events = POLLIN | POLLOUT;
+		pfds[0].events = POLLIN;
 		pfds[0].revents = 0;
 
 		/* Add MIDI fds */
@@ -317,7 +317,6 @@ int main(int argc, char *argv[])
 				if ( r < 0 ) {
 					fprintf(stderr, "MIDI read failed\n");
 				} else {
-					printf("%li new bytes\n", r);
 					size_t total_proc = 0;
 					size_t p;
 					midi_buf_pos += r;
