@@ -131,6 +131,73 @@ static void add_led(lo_server osc_server, snd_rawmidi_t *midi_out,
 }
 
 
+static void handle_note_off(int note, int vel, lo_address osc_send_addr)
+{
+	printf("note off %i, vel %i\n", note, vel);
+}
+
+
+static void handle_note(int note, int vel, lo_address osc_send_addr)
+{
+	printf("note %i, vel %i\n", note, vel);
+	switch ( note ) {
+
+		case 26:
+		lo_send(osc_send_addr, "/starlet/selection/clear", "");
+		break;
+
+		case 32:
+		lo_send(osc_send_addr, "/starlet/selection/mhLL", "");
+		break;
+
+		case 33:
+		lo_send(osc_send_addr, "/starlet/selection/mhL", "");
+		break;
+
+		case 34:
+		lo_send(osc_send_addr, "/starlet/selection/mhR", "");
+		break;
+
+		case 35:
+		lo_send(osc_send_addr, "/starlet/selection/mhRR", "");
+		break;
+
+	}
+}
+
+
+static void handle_cc(int cc, int val, lo_address osc_send_addr)
+{
+	printf("CC %i = %i\n", cc, val);
+}
+
+
+static size_t process_midi(unsigned char *buf, size_t avail, lo_address osc_send_addr)
+{
+	if ( avail < 1 ) return 0;
+
+	if ( (buf[0] & 0xf0) == 0x90 ) {
+		/* Note on */
+		if ( avail < 3 ) return 0;
+		handle_note(buf[1], buf[2], osc_send_addr);
+		return 3;
+	} else if ( (buf[0] & 0xf0) == 0x80 ) {
+		/* Note off */
+		if ( avail < 3 ) return 0;
+		handle_note_off(buf[1], buf[2], osc_send_addr);
+		return 3;
+	} else if ( (buf[0] & 0xf0) == 0xb0 ) {
+		/* CC change */
+		if ( avail < 3 ) return 0;
+		handle_cc(buf[1], buf[2], osc_send_addr);
+		return 3;
+	} else {
+		printf("Ignoring MIDI command %i\n", buf[0]);
+		return 1;
+	}
+}
+
+
 static int flip_position(int i)
 {
 	int x = i % 4;
@@ -147,7 +214,10 @@ int main(int argc, char *argv[])
 	snd_rawmidi_t *midi_in;
 	snd_rawmidi_t *midi_out;
 	lo_server osc_server;
+	lo_address osc_send_addr;
 	int lo_fd;
+	unsigned char midi_buf[4096];
+	size_t midi_buf_pos = 0;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -200,6 +270,7 @@ int main(int argc, char *argv[])
 
 	osc_server = lo_server_new("7771", error_callback);
 	lo_fd = lo_server_get_socket_fd(osc_server);
+	osc_send_addr = lo_address_new(NULL, "7770");
 
 	for ( i=0; i<32; i++ ) {
 		add_led(osc_server, midi_out, flip_position(i),
@@ -236,13 +307,29 @@ int main(int argc, char *argv[])
 			                                     &pfds[1], nfds,
 			                                     &revents);
 
-			if ( revents & POLLIN ) {
-				ssize_t r;
-				char buf[1024];
+			if ( (revents & POLLIN) && (midi_buf_pos < 2048) ) {
 
-				r = snd_rawmidi_read(midi_in, buf, 1024);
-				if ( r > 0 ) {
-					printf("got %li\n", r);
+				ssize_t r;
+
+				r = snd_rawmidi_read(midi_in,
+				                     &midi_buf[midi_buf_pos],
+				                     4096-midi_buf_pos);
+				if ( r < 0 ) {
+					fprintf(stderr, "MIDI read failed\n");
+				} else {
+					printf("%li new bytes\n", r);
+					size_t total_proc = 0;
+					size_t p;
+					midi_buf_pos += r;
+					do {
+						p = process_midi(midi_buf+total_proc,
+						                 midi_buf_pos-total_proc,
+						                 osc_send_addr);
+						total_proc += p;
+					} while ( p > 0 );
+					memmove(midi_buf, midi_buf+total_proc,
+					        4096-total_proc);
+					midi_buf_pos -= total_proc;
 				}
 			}
 		}
