@@ -28,6 +28,12 @@
 #include <lo/lo.h>
 
 
+int fine_buttons[] = {52, 53, 54, 55, 13, 14};
+int fine_vals[] = {0, 0, 0, 0, 0, 0};
+int fine_encoders[] = {1, 2, 3, 4, 101, 102};
+int num_fine = 6;
+
+
 static void show_help(const char *s)
 {
 	printf("Syntax: %s [-h] [-d /dev/snd/midiXXXX]\n\n", s);
@@ -133,7 +139,13 @@ static void add_led(lo_server osc_server, snd_rawmidi_t *midi_out,
 
 static void handle_note_off(int note, int vel, lo_address osc_send_addr)
 {
-	printf("note off %i, vel %i\n", note, vel);
+	int i;
+
+	for ( i=0; i<num_fine; i++ ) {
+		if ( note == fine_buttons[i] ) {
+			fine_vals[i] = 0;
+		}
+	}
 }
 
 
@@ -161,14 +173,42 @@ static void handle_note(int note, int vel, lo_address osc_send_addr)
 		case 35:
 		lo_send(osc_send_addr, "/starlet/selection/mhRR", "");
 		break;
+	int i;
 
+	for ( i=0; i<num_fine; i++ ) {
+		if ( note == fine_buttons[i] ) {
+			fine_vals[i] = 1;
+		}
 	}
 }
 
 
 static void handle_encoder(int enc, int val, lo_address osc_send_addr)
 {
-	printf("encoder %i: %i\n", enc, val);
+	char tmp[32];
+	const char *v;
+	int i;
+	const char *fine = "";
+
+	if ( val == 1 ) {
+		v = "inc";
+	} else if ( val == 127 ) {
+		v = "dec";
+	} else {
+		fprintf(stderr, "Invalid encoder value %i\n", val);
+		return;
+	}
+
+	for ( i=0; i<num_fine; i++ ) {
+		if ( enc == fine_encoders[i] ) {
+			if ( fine_vals[i] ) {
+				fine = "-fine";
+			}
+		}
+	}
+
+	snprintf(tmp, 32, "/x1k2/encoders/%i/%s%s", enc, v, fine);
+	lo_send(osc_send_addr, tmp, "");
 }
 
 
@@ -177,8 +217,6 @@ static void handle_cc(int cc, int val, lo_address osc_send_addr)
 	char tmp[32];
 	const char *type;
 	int num;
-
-	printf("CC %i = %i\n", cc, val);
 
 	if ( cc < 4 ) {
 		handle_encoder(cc+1, val, osc_send_addr);
@@ -190,7 +228,7 @@ static void handle_cc(int cc, int val, lo_address osc_send_addr)
 		type = "faders";
 		num = cc-15;
 	} else if ( cc<=21 ) {
-		handle_encoder(cc-15, val, osc_send_addr);
+		handle_encoder(cc+81, val, osc_send_addr);
 		return;
 	} else {
 		fprintf(stderr, "CC %i unrecognised!\n", cc);
