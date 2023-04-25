@@ -33,6 +33,23 @@ int fine_vals[] = {0, 0, 0, 0, 0, 0};
 int fine_encoders[] = {1, 2, 3, 4, 101, 102};
 int num_fine = 6;
 
+int buttons[] = {48, 49, 50, 51,
+                 44, 45, 46, 47,
+                 40, 41, 42, 43,
+                 36, 37, 38, 39,
+                 32, 33, 34, 35,
+                 28, 29, 30, 31,
+                 24, 25, 26, 27,
+                 12, 15};
+int button_numbers[] = {5, 6, 7, 8,
+                        9, 10, 11, 12,
+                        13, 14, 15, 16,
+                        17, 18, 19, 20,
+                        21, 22, 23, 24,
+                        25, 26, 27, 28,
+                        29, 30, 31, 32,
+                        101, 102};
+int num_buttons = 34;
 
 static void show_help(const char *s)
 {
@@ -151,29 +168,16 @@ static void handle_note_off(int note, int vel, lo_address osc_send_addr)
 
 static void handle_note(int note, int vel, lo_address osc_send_addr)
 {
-	printf("note %i, vel %i\n", note, vel);
-	switch ( note ) {
-
-		case 26:
-		lo_send(osc_send_addr, "/starlet/selection/clear", "");
-		break;
-
-		case 32:
-		lo_send(osc_send_addr, "/starlet/selection/mhLL", "");
-		break;
-
-		case 33:
-		lo_send(osc_send_addr, "/starlet/selection/mhL", "");
-		break;
-
-		case 34:
-		lo_send(osc_send_addr, "/starlet/selection/mhR", "");
-		break;
-
-		case 35:
-		lo_send(osc_send_addr, "/starlet/selection/mhRR", "");
-		break;
 	int i;
+
+	for ( i=0; i<num_buttons; i++ ) {
+		if ( note == buttons[i] ) {
+			char tmp[256];
+			snprintf(tmp, 255, "/x1k2/buttons/%i",
+			         button_numbers[i]);
+			lo_send(osc_send_addr, tmp, "");
+		}
+	}
 
 	for ( i=0; i<num_fine; i++ ) {
 		if ( note == fine_buttons[i] ) {
