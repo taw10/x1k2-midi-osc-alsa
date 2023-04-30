@@ -279,6 +279,16 @@ static int flip_position(int i)
 }
 
 
+static int hup_err(struct pollfd *pfds, int nfds)
+{
+	int i;
+	for ( i=0; i<nfds; i++ ) {
+		if ( pfds[i].revents & (POLLERR | POLLHUP) ) return 1;
+	}
+	return 0;
+}
+
+
 int main(int argc, char *argv[])
 {
 	int c, r, i;
@@ -370,6 +380,11 @@ int main(int argc, char *argv[])
 		} else {
 
 			unsigned short revents;
+
+			if ( hup_err(pfds, 1+nfds) ) {
+				fprintf(stderr, "Error!\n");
+				break;
+			}
 
 			if ( pfds[0].revents & POLLIN ) {
 				lo_server_recv_noblock(osc_server, 0);
