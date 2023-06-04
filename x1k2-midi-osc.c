@@ -176,6 +176,7 @@ static void handle_note(int note, int vel, lo_address osc_send_addr)
 			snprintf(tmp, 255, "/x1k2/buttons/%i",
 			         button_numbers[i]);
 			lo_send(osc_send_addr, tmp, "");
+			printf("sending %s\n", tmp);
 		}
 	}
 
@@ -212,6 +213,7 @@ static void handle_encoder(int enc, int val, lo_address osc_send_addr)
 	}
 
 	snprintf(tmp, 32, "/x1k2/encoders/%i/%s%s", enc, v, fine);
+	printf("sending %s\n", tmp);
 	lo_send(osc_send_addr, tmp, "");
 }
 
@@ -240,6 +242,7 @@ static void handle_cc(int cc, int val, lo_address osc_send_addr)
 	}
 
 	snprintf(tmp, 32, "/x1k2/%s/%i", type, num);
+	printf("sending %s = %i\n", tmp, val);
 	lo_send(osc_send_addr, tmp, "i", val);
 }
 
