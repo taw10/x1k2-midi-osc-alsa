@@ -78,7 +78,7 @@ static void send_note_on(snd_rawmidi_t *midi_out, int note)
 	if ( r != 3 ) {
 		printf("snd_rawmidi_write said %li\n", r);
 	}
-	snd_rawmidi_drain(midi_out);
+	usleep(1000);
 }
 
 
@@ -93,7 +93,7 @@ static void send_note_off(snd_rawmidi_t *midi_out, int note)
 	if ( r != 3 ) {
 		printf("snd_rawmidi_write said %li\n", r);
 	}
-	snd_rawmidi_drain(midi_out);
+	usleep(1000);
 }
 
 
