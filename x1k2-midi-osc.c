@@ -28,28 +28,161 @@
 #include <lo/lo.h>
 
 
-int fine_buttons[] = {52, 53, 54, 55, 13, 14};
-int fine_vals[] = {0, 0, 0, 0, 0, 0};
-int fine_encoders[] = {1, 2, 3, 4, 101, 102};
-int num_fine = 6;
+struct faderpot
+{
+	int id;
+	int cc_val;
+	int physical_value;
+	int physical_value_known;
+	int enabled;
+	int pickup_value;
+	int has_button_and_led;
+	int button;
+	int led_green;
+	int led_orange;
+	int led_red;
+	const char *type;
+};
 
-int buttons[] = {48, 49, 50, 51,
-                 44, 45, 46, 47,
-                 40, 41, 42, 43,
-                 36, 37, 38, 39,
-                 32, 33, 34, 35,
-                 28, 29, 30, 31,
-                 24, 25, 26, 27,
-                 12, 15};
-int button_numbers[] = {5, 6, 7, 8,
-                        9, 10, 11, 12,
-                        13, 14, 15, 16,
-                        17, 18, 19, 20,
-                        21, 22, 23, 24,
-                        25, 26, 27, 28,
-                        29, 30, 31, 32,
-                        101, 102};
-int num_buttons = 34;
+
+struct encoder
+{
+	int id;
+	int cc_val;
+	int enabled;
+	int fine_button;
+	int fine_active;
+	int has_led;
+	int led_green;
+	int led_orange;
+	int led_red;
+};
+
+
+struct button
+{
+	const char *name;
+	int note;
+	int led_green;
+	int led_orange;
+	int led_red;
+};
+
+
+struct button buttons[18];
+struct encoder encoders[6];
+struct faderpot faders[4];
+struct faderpot potentiometers[12];
+int n_buttons = 18;
+int n_encoders = 6;
+int n_faders = 4;
+int n_potentiometers = 12;
+
+
+static void init_fader(struct faderpot *fad, int id, int cc_val)
+{
+	fad->id = id;
+	fad->cc_val = cc_val;
+	fad->physical_value = 0;
+	fad->physical_value_known = 0;
+	fad->pickup_value = 0;
+	fad->has_button_and_led = 0;
+	fad->enabled = 0;
+	fad->type = "faders";
+}
+
+
+static void init_potentiometer(struct faderpot *fad, int id, int cc_val,
+                               int button)
+{
+	fad->id = id;
+	fad->cc_val = cc_val;
+	fad->physical_value = 0;
+	fad->physical_value_known = 0;
+	fad->pickup_value = 0;
+	fad->has_button_and_led = 1;
+	fad->button = button;
+	fad->led_red = button;
+	fad->led_orange = button+36;
+	fad->led_green = button+72;
+	fad->enabled = 0;
+	fad->type = "potentiometers";
+}
+
+
+static void add_faderpot_methods(struct faderpot *fad, lo_server osc_server)
+{
+	char tmp[256];
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/set-pickup-value", fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "i", pot_set_pickup_handler, fad);
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/enable", fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "", pot_enable_handler, fad);
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/disable",  fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "", pot_enable_handler, fad);
+}
+
+
+static void init_encoder_noled(struct encoder *enc, int id, int cc_val,
+                               int fine_button)
+{
+	enc->id = id;
+	enc->cc_val = cc_val;
+	enc->fine_button = fine_button;
+	enc->fine_active = 0;
+	enc->has_led = 0;
+}
+
+
+static void init_encoder(struct encoder *enc, int id, int cc_val,
+                         int fine_button)
+{
+	enc->id = id;
+	enc->cc_val = cc_val;
+	enc->fine_button = fine_button;
+	enc->fine_active = 0;
+	enc->has_led = 1;
+	enc->led_red = fine_button;
+	enc->led_orange = fine_button+36;
+	enc->led_green = fine_button+72;
+}
+
+
+static void add_encoder_methods(struct encoder *enc, lo_server osc_server)
+{
+	char tmp[256];
+	snprintf(tmp, 255, "/x1k2/encoders/%i/set-led", enc->id);
+	lo_server_add_method(osc_server, tmp, "s", enc_set_led_handler, enc);
+}
+
+
+
+static void init_button_full(struct button *but, const char *name, int note,
+                             int r, int o, int g)
+{
+	but->name = name;
+	but->note = note;
+	but->led_red = r;
+	but->led_orange = o;
+	but->led_green = g;
+}
+
+
+static void init_button(struct button *but, const char *name, int note)
+{
+	init_button_full(but, name, note, note, note+36, note+72);
+}
+
+
+static void add_button_methods(struct button *but, lo_server osc_server)
+{
+	char tmp[256];
+	snprintf(tmp, 255, "/x1k2/buttons/%s/set-led", but->name);
+	lo_server_add_method(osc_server, tmp, "s", button_set_led_handler, but);
+}
+
 
 static void show_help(const char *s)
 {
@@ -135,22 +268,10 @@ static int led_handler(const char *path, const char *types, lo_arg **argv,
 }
 
 
-static void add_led(lo_server osc_server, snd_rawmidi_t *midi_out,
-                    int led, int red, int orange, int green)
+static int pot_set_pickup_handler(const char *path, const char *types, lo_arg **argv,
+                                  int argc, lo_message msg, void *vp)
 {
-	char tmp[256];
-	struct led_callback_data *cb;
-
-	cb = malloc(sizeof(struct led_callback_data));
-	if ( cb == NULL ) return;
-
-	cb->midi_out = midi_out;
-	cb->red = red;
-	cb->orange = orange;
-	cb->green = green;
-
-	snprintf(tmp, 255, "/x1k2/leds/%i", led);
-	lo_server_add_method(osc_server, tmp, "s", led_handler, cb);
+	return 1;
 }
 
 
@@ -273,15 +394,6 @@ static size_t process_midi(unsigned char *buf, size_t avail, lo_address osc_send
 }
 
 
-static int flip_position(int i)
-{
-	int x = i % 4;
-	int y = i / 4;
-	y = 7-y;
-	return 1+y*4+x;
-}
-
-
 static int hup_err(struct pollfd *pfds, int nfds)
 {
 	int i;
@@ -353,16 +465,66 @@ int main(int argc, char *argv[])
 	/* Set non-blocking mode for input (read) stream only */
 	snd_rawmidi_nonblock(midi_in, 1);
 
+	/* Create OSC server and destination */
 	osc_server = lo_server_new("7771", error_callback);
 	lo_fd = lo_server_get_socket_fd(osc_server);
 	osc_send_addr = lo_address_new(NULL, "7770");
 
-	for ( i=0; i<32; i++ ) {
-		add_led(osc_server, midi_out, flip_position(i),
-		        i+24, i+60, i+96);
+	init_button(&buttons[0], "A", 36);
+	init_button(&buttons[1], "B", 37);
+	init_button(&buttons[2], "C", 38);
+	init_button(&buttons[3], "D", 39);
+	init_button(&buttons[4], "E", 32);
+	init_button(&buttons[5], "F", 33);
+	init_button(&buttons[6], "G", 34);
+	init_button(&buttons[7], "H", 35);
+	init_button(&buttons[8], "I", 28);
+	init_button(&buttons[9], "J", 29);
+	init_button(&buttons[10], "K", 30);
+	init_button(&buttons[11], "L", 31);
+	init_button(&buttons[12], "M", 24);
+	init_button(&buttons[13], "N", 25);
+	init_button(&buttons[14], "O", 26);
+	init_button(&buttons[15], "P", 27);
+	init_button_full(&buttons[16], "LAYER", 12, 12, 16, 20);
+	init_button_full(&buttons[17], "SHIFT", 15, 15, 19, 23);
+	for ( i=0; i<n_buttons; i++ ) {
+		add_button_methods(&buttons[i], osc_server);
 	}
-	add_led(osc_server, midi_out, 101, 12, 16, 20);
-	add_led(osc_server, midi_out, 102, 15, 19, 23);
+
+	init_encoder(&encoders[0], 1, 0, 52);
+	init_encoder(&encoders[1], 2, 1, 53);
+	init_encoder(&encoders[2], 3, 2, 54);
+	init_encoder(&encoders[3], 4, 3, 55);
+	init_encoder_noled(&encoders[4], 5, 20, 13);
+	init_encoder_noled(&encoders[5], 6, 21, 14);
+	for ( i=0; i<n_encoders; i++ ) {
+		add_encoder_methods(&encoders[i], osc_server);
+	}
+
+	init_fader(&faders[0], 1, 16);
+	init_fader(&faders[1], 2, 17);
+	init_fader(&faders[2], 3, 18);
+	init_fader(&faders[3], 4, 19);
+	for ( i=0; i<n_faders; i++ ) {
+		add_faderpot_methods(&faders[i], osc_server);
+	}
+
+	init_potentiometer(&potentiometers[0], 1, 4, 48);
+	init_potentiometer(&potentiometers[1], 2, 5, 49);
+	init_potentiometer(&potentiometers[2], 3, 6, 50);
+	init_potentiometer(&potentiometers[3], 4, 7, 51);
+	init_potentiometer(&potentiometers[4], 5, 8, 44);
+	init_potentiometer(&potentiometers[5], 6, 9, 45);
+	init_potentiometer(&potentiometers[6], 7, 10, 46);
+	init_potentiometer(&potentiometers[7], 8, 11, 47);
+	init_potentiometer(&potentiometers[8], 9, 12, 40);
+	init_potentiometer(&potentiometers[9], 10, 13, 41);
+	init_potentiometer(&potentiometers[10], 11, 14, 42);
+	init_potentiometer(&potentiometers[11], 12, 15, 43);
+	for ( i=0; i<n_potentiometers; i++ ) {
+		add_faderpot_methods(&potentiometers[i], osc_server);
+	}
 
 	do {
 
