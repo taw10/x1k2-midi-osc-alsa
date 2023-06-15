@@ -35,6 +35,7 @@ struct faderpot
 	int physical_value;
 	int physical_value_known;
 	int enabled;
+	int congruent;
 	int pickup_value;
 	int has_button_and_led;
 	int button;
@@ -49,7 +50,6 @@ struct encoder
 {
 	int id;
 	int cc_val;
-	int enabled;
 	int fine_button;
 	int fine_active;
 	int has_led;
@@ -78,126 +78,7 @@ int n_encoders = 6;
 int n_faders = 4;
 int n_potentiometers = 12;
 
-
-static void init_fader(struct faderpot *fad, int id, int cc_val)
-{
-	fad->id = id;
-	fad->cc_val = cc_val;
-	fad->physical_value = 0;
-	fad->physical_value_known = 0;
-	fad->pickup_value = 0;
-	fad->has_button_and_led = 0;
-	fad->enabled = 0;
-	fad->type = "faders";
-}
-
-
-static void init_potentiometer(struct faderpot *fad, int id, int cc_val,
-                               int button)
-{
-	fad->id = id;
-	fad->cc_val = cc_val;
-	fad->physical_value = 0;
-	fad->physical_value_known = 0;
-	fad->pickup_value = 0;
-	fad->has_button_and_led = 1;
-	fad->button = button;
-	fad->led_red = button;
-	fad->led_orange = button+36;
-	fad->led_green = button+72;
-	fad->enabled = 0;
-	fad->type = "potentiometers";
-}
-
-
-static void add_faderpot_methods(struct faderpot *fad, lo_server osc_server)
-{
-	char tmp[256];
-
-	snprintf(tmp, 255, "/x1k2/%s/%i/set-pickup-value", fad->type, fad->id);
-	lo_server_add_method(osc_server, tmp, "i", pot_set_pickup_handler, fad);
-
-	snprintf(tmp, 255, "/x1k2/%s/%i/enable", fad->type, fad->id);
-	lo_server_add_method(osc_server, tmp, "", pot_enable_handler, fad);
-
-	snprintf(tmp, 255, "/x1k2/%s/%i/disable",  fad->type, fad->id);
-	lo_server_add_method(osc_server, tmp, "", pot_enable_handler, fad);
-}
-
-
-static void init_encoder_noled(struct encoder *enc, int id, int cc_val,
-                               int fine_button)
-{
-	enc->id = id;
-	enc->cc_val = cc_val;
-	enc->fine_button = fine_button;
-	enc->fine_active = 0;
-	enc->has_led = 0;
-}
-
-
-static void init_encoder(struct encoder *enc, int id, int cc_val,
-                         int fine_button)
-{
-	enc->id = id;
-	enc->cc_val = cc_val;
-	enc->fine_button = fine_button;
-	enc->fine_active = 0;
-	enc->has_led = 1;
-	enc->led_red = fine_button;
-	enc->led_orange = fine_button+36;
-	enc->led_green = fine_button+72;
-}
-
-
-static void add_encoder_methods(struct encoder *enc, lo_server osc_server)
-{
-	char tmp[256];
-	snprintf(tmp, 255, "/x1k2/encoders/%i/set-led", enc->id);
-	lo_server_add_method(osc_server, tmp, "s", enc_set_led_handler, enc);
-}
-
-
-
-static void init_button_full(struct button *but, const char *name, int note,
-                             int r, int o, int g)
-{
-	but->name = name;
-	but->note = note;
-	but->led_red = r;
-	but->led_orange = o;
-	but->led_green = g;
-}
-
-
-static void init_button(struct button *but, const char *name, int note)
-{
-	init_button_full(but, name, note, note, note+36, note+72);
-}
-
-
-static void add_button_methods(struct button *but, lo_server osc_server)
-{
-	char tmp[256];
-	snprintf(tmp, 255, "/x1k2/buttons/%s/set-led", but->name);
-	lo_server_add_method(osc_server, tmp, "s", button_set_led_handler, but);
-}
-
-
-static void show_help(const char *s)
-{
-	printf("Syntax: %s [-h] [-d /dev/snd/midiXXXX]\n\n", s);
-	printf("MIDI to OSC interface for A&H Xone:K2\n"
-	       "\n"
-	       " -h, --help              Display this help message.\n"
-	       " -d, --device <dev>      MIDI device name.\n");
-}
-
-
-static void error_callback(int num, const char *msg, const char *path)
-{
-	fprintf(stderr, "liblo error %i (%s) for path %s\n", num, msg, path);
-}
+snd_rawmidi_t *midi_out;
 
 
 static void send_note_on(snd_rawmidi_t *midi_out, int note)
@@ -230,36 +111,201 @@ static void send_note_off(snd_rawmidi_t *midi_out, int note)
 }
 
 
-struct led_callback_data
+static void init_fader(struct faderpot *fad, int id, int cc_val)
 {
-	int red;
-	int orange;
-	int green;
-	snd_rawmidi_t *midi_out;
-};
+	fad->id = id;
+	fad->cc_val = cc_val;
+	fad->physical_value = 0;
+	fad->physical_value_known = 0;
+	fad->pickup_value = 0;
+	fad->has_button_and_led = 0;
+	fad->enabled = 1;
+	fad->type = "faders";
+}
 
 
-static int led_handler(const char *path, const char *types, lo_arg **argv,
-                       int argc, lo_message msg, void *vp)
+static void init_potentiometer(struct faderpot *fad, int id, int cc_val,
+                               int button)
 {
-	struct led_callback_data *cb = vp;
-	if ( strcmp("red", &argv[0]->s) == 0 ) {
-		send_note_on(cb->midi_out, cb->red);
-	} else if ( strcmp("orange", &argv[0]->s) == 0 ) {
-		send_note_on(cb->midi_out, cb->orange);
-	} else if ( strcmp("green", &argv[0]->s) == 0 ) {
-		send_note_on(cb->midi_out, cb->green);
-	} else if ( strcmp("off", &argv[0]->s) == 0 ) {
+	fad->id = id;
+	fad->cc_val = cc_val;
+	fad->physical_value = 0;
+	fad->physical_value_known = 0;
+	fad->pickup_value = 0;
+	fad->congruent = 0;
+	fad->has_button_and_led = 1;
+	fad->button = button;
+	fad->led_red = button;
+	fad->led_orange = button+36;
+	fad->led_green = button+72;
+	fad->enabled = 0;
+	fad->type = "potentiometers";
+}
 
-		/* Usually, turning off any one of the colours turns off the
-		 * LED, regardless of the current colour.  However, the bottom
-		 * left button's LED is weird, I think because it's
-		 * also the "layer" button.  It can only be switched off
-		 * from the same colour.  So, we force it to be red. */
-		if ( cb->red == 12 ) {
-			send_note_on(cb->midi_out, cb->red);
+
+static void faderpot_note_on(struct faderpot *fad)
+{
+	/* Ignored for now */
+}
+
+
+static void faderpot_note_off(struct faderpot *fad)
+{
+	/* Ignored for now */
+}
+
+
+static int in_range(int a, int val1, int val2)
+{
+	return ((a>=val1) && (a<=val2)) || ((a>=val2) && (a<=val1));
+}
+
+
+static void pot_set_led(struct faderpot *fad)
+{
+	if ( fad->has_button_and_led ) {
+		if ( fad->enabled ) {
+			if ( fad->congruent ) {
+				send_note_on(midi_out, fad->led_green);
+			} else {
+				send_note_on(midi_out, fad->led_orange);
+			}
+		} else {
+			send_note_off(midi_out, fad->led_green);
 		}
-		send_note_off(cb->midi_out, cb->red);
+	}
+}
+
+
+static void faderpot_cc(struct faderpot *fad, int val, lo_address osc_send_addr)
+{
+	if ( !fad->congruent ) {
+		int inr = in_range(fad->pickup_value, fad->physical_value, val);
+		if ( fad->physical_value_known && inr ) {
+			fad->congruent = 1;
+		}
+	}
+
+	if ( fad->enabled ) {
+
+		pot_set_led(fad);
+
+		if ( fad->congruent ) {
+			char tmp[64];
+			snprintf(tmp, 64, "/x1k2/%s/%i/value-change", fad->type, fad->id);
+			lo_send(osc_send_addr, tmp, "i", val);
+			printf("sending %s = %i\n", tmp, val);
+		}
+
+	}
+
+	fad->physical_value = val;
+	fad->physical_value_known = 1;
+}
+
+
+static int pot_set_pickup_handler(const char *path, const char *types,
+                                  lo_arg **argv, int argc,
+                                  lo_message msg, void *vp)
+{
+	struct faderpot *fad = vp;
+
+	fad->pickup_value = argv[0]->i;
+
+	if ( fad->physical_value_known
+	  && (fad->pickup_value == fad->physical_value) )
+	{
+		fad->congruent = 1;
+	} else {
+		fad->congruent = 0;
+	}
+
+	pot_set_led(fad);
+
+	return 1;
+}
+
+
+static int pot_enable_handler(const char *path, const char *types,
+                              lo_arg **argv, int argc,
+                              lo_message msg, void *vp)
+{
+	struct faderpot *fad = vp;
+	fad->enabled = 1;
+	pot_set_led(fad);
+	return 1;
+}
+
+
+static int pot_disable_handler(const char *path, const char *types,
+                               lo_arg **argv, int argc,
+                               lo_message msg, void *vp)
+{
+	struct faderpot *fad = vp;
+
+	fad->enabled = 0;
+
+	if ( fad->has_button_and_led ) {
+		send_note_off(midi_out, fad->led_green);
+	}
+
+	return 1;
+}
+
+
+static void add_faderpot_methods(struct faderpot *fad, lo_server osc_server)
+{
+	char tmp[256];
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/set-pickup", fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "i", pot_set_pickup_handler, fad);
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/enable", fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "", pot_enable_handler, fad);
+
+	snprintf(tmp, 255, "/x1k2/%s/%i/disable",  fad->type, fad->id);
+	lo_server_add_method(osc_server, tmp, "", pot_disable_handler, fad);
+}
+
+
+static void init_encoder_noled(struct encoder *enc, int id, int cc_val,
+                               int fine_button)
+{
+	enc->id = id;
+	enc->cc_val = cc_val;
+	enc->fine_button = fine_button;
+	enc->fine_active = 0;
+	enc->has_led = 0;
+}
+
+
+static void init_encoder(struct encoder *enc, int id, int cc_val,
+                         int fine_button)
+{
+	enc->id = id;
+	enc->cc_val = cc_val;
+	enc->fine_button = fine_button;
+	enc->fine_active = 0;
+	enc->has_led = 1;
+	enc->led_red = fine_button;
+	enc->led_orange = fine_button+36;
+	enc->led_green = fine_button+72;
+}
+
+
+static int enc_set_led_handler(const char *path, const char *types,
+                               lo_arg **argv, int argc,
+                               lo_message msg, void *vp)
+{
+	struct encoder *enc = vp;
+	if ( strcmp("red", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, enc->led_red);
+	} else if ( strcmp("orange", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, enc->led_orange);
+	} else if ( strcmp("green", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, enc->led_green);
+	} else if ( strcmp("off", &argv[0]->s) == 0 ) {
+		send_note_off(midi_out, enc->led_red);
 	} else {
 		fprintf(stderr, "Unrecognised LED mode '%s'\n", &argv[0]->s);
 	}
@@ -268,53 +314,22 @@ static int led_handler(const char *path, const char *types, lo_arg **argv,
 }
 
 
-static int pot_set_pickup_handler(const char *path, const char *types, lo_arg **argv,
-                                  int argc, lo_message msg, void *vp)
+static void encoder_note_on(struct encoder *enc)
 {
-	return 1;
+	enc->fine_active = 1;
 }
 
 
-static void handle_note_off(int note, int vel, lo_address osc_send_addr)
+static void encoder_note_off(struct encoder *enc)
 {
-	int i;
-
-	for ( i=0; i<num_fine; i++ ) {
-		if ( note == fine_buttons[i] ) {
-			fine_vals[i] = 0;
-		}
-	}
+	enc->fine_active = 0;
 }
 
 
-static void handle_note(int note, int vel, lo_address osc_send_addr)
+static void encoder_cc(struct encoder *enc, int val, lo_address osc_send_addr)
 {
-	int i;
-
-	for ( i=0; i<num_buttons; i++ ) {
-		if ( note == buttons[i] ) {
-			char tmp[256];
-			snprintf(tmp, 255, "/x1k2/buttons/%i",
-			         button_numbers[i]);
-			lo_send(osc_send_addr, tmp, "");
-			printf("sending %s\n", tmp);
-		}
-	}
-
-	for ( i=0; i<num_fine; i++ ) {
-		if ( note == fine_buttons[i] ) {
-			fine_vals[i] = 1;
-		}
-	}
-}
-
-
-static void handle_encoder(int enc, int val, lo_address osc_send_addr)
-{
-	char tmp[32];
+	char tmp[256];
 	const char *v;
-	int i;
-	const char *fine = "";
 
 	if ( val == 1 ) {
 		v = "inc";
@@ -325,46 +340,188 @@ static void handle_encoder(int enc, int val, lo_address osc_send_addr)
 		return;
 	}
 
-	for ( i=0; i<num_fine; i++ ) {
-		if ( enc == fine_encoders[i] ) {
-			if ( fine_vals[i] ) {
-				fine = "-fine";
-			}
+	snprintf(tmp, 255, "/x1k2/encoders/%i/%s%s",
+	         enc->id, v, enc->fine_active ? "-fine" : "");
+	lo_send(osc_send_addr, tmp, "");
+}
+
+
+static void add_encoder_methods(struct encoder *enc, lo_server osc_server)
+{
+	char tmp[256];
+	snprintf(tmp, 255, "/x1k2/encoders/%i/set-led", enc->id);
+	lo_server_add_method(osc_server, tmp, "s", enc_set_led_handler, enc);
+}
+
+
+static void init_button_full(struct button *but, const char *name, int note,
+                             int r, int o, int g)
+{
+	but->name = name;
+	but->note = note;
+	but->led_red = r;
+	but->led_orange = o;
+	but->led_green = g;
+}
+
+
+static void init_button(struct button *but, const char *name, int note)
+{
+	init_button_full(but, name, note, note, note+36, note+72);
+}
+
+
+static void button_note_off(struct button *but, lo_address osc_send_addr)
+{
+}
+
+
+static void button_note_on(struct button *but, lo_address osc_send_addr)
+{
+	char tmp[256];
+	snprintf(tmp, 255, "/x1k2/buttons/%s/press", but->name);
+	lo_send(osc_send_addr, tmp, "");
+}
+
+
+static int button_set_led_handler(const char *path, const char *types,
+                                  lo_arg **argv, int argc,
+                                  lo_message msg, void *vp)
+{
+	struct button *but = vp;
+	if ( strcmp("red", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, but->led_red);
+	} else if ( strcmp("orange", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, but->led_orange);
+	} else if ( strcmp("green", &argv[0]->s) == 0 ) {
+		send_note_on(midi_out, but->led_green);
+	} else if ( strcmp("off", &argv[0]->s) == 0 ) {
+
+		/* Usually, turning off any one of the colours turns off the
+		 * LED, regardless of the current colour.  However, the bottom
+		 * left button's LED is weird, I think because it's
+		 * also the "layer" button.  It can only be switched off
+		 * from the same colour.  So, we force it to be red. */
+		if ( but->led_red == 12 ) {
+			send_note_on(midi_out, but->led_red);
+		}
+		send_note_off(midi_out, but->led_red);
+	} else {
+		fprintf(stderr, "Unrecognised LED mode '%s'\n", &argv[0]->s);
+	}
+
+	return 1;
+}
+
+
+static void add_button_methods(struct button *but, lo_server osc_server)
+{
+	char tmp[256];
+	snprintf(tmp, 255, "/x1k2/buttons/%s/set-led", but->name);
+	lo_server_add_method(osc_server, tmp, "s", button_set_led_handler, but);
+}
+
+
+static void show_help(const char *s)
+{
+	printf("Syntax: %s [-h] [-d /dev/snd/midiXXXX]\n\n", s);
+	printf("MIDI to OSC interface for A&H Xone:K2\n"
+	       "\n"
+	       " -h, --help              Display this help message.\n"
+	       " -d, --device <dev>      MIDI device name.\n");
+}
+
+
+static void error_callback(int num, const char *msg, const char *path)
+{
+	fprintf(stderr, "liblo error %i (%s) for path %s\n", num, msg, path);
+}
+
+
+static void handle_note_off(int note, int vel, lo_address osc_send_addr)
+{
+	int i;
+
+	for ( i=0; i<n_potentiometers; i++ ) {
+		if ( note == potentiometers[i].button ) {
+			faderpot_note_off(&potentiometers[i]);
+			return;
 		}
 	}
 
-	snprintf(tmp, 32, "/x1k2/encoders/%i/%s%s", enc, v, fine);
-	printf("sending %s\n", tmp);
-	lo_send(osc_send_addr, tmp, "");
+	for ( i=0; i<n_encoders; i++ ) {
+		if ( note == encoders[i].fine_button ) {
+			encoder_note_off(&encoders[i]);
+			return;
+		}
+	}
+
+	for ( i=0; i<n_buttons; i++ ) {
+		if ( note == buttons[i].note ) {
+			button_note_off(&buttons[i], osc_send_addr);
+			return;
+		}
+	}
+
+	fprintf(stderr, "Unrecognised note %i\n", note);
+}
+
+
+static void handle_note(int note, int vel, lo_address osc_send_addr)
+{
+	int i;
+
+	for ( i=0; i<n_potentiometers; i++ ) {
+		if ( note == potentiometers[i].button ) {
+			faderpot_note_on(&potentiometers[i]);
+			return;
+		}
+	}
+
+	for ( i=0; i<n_encoders; i++ ) {
+		if ( note == encoders[i].fine_button ) {
+			encoder_note_on(&encoders[i]);
+			return;
+		}
+	}
+
+	for ( i=0; i<n_buttons; i++ ) {
+		if ( note == buttons[i].note ) {
+			button_note_on(&buttons[i], osc_send_addr);
+			return;
+		}
+	}
+
+	fprintf(stderr, "Unrecognised note %i\n", note);
 }
 
 
 static void handle_cc(int cc, int val, lo_address osc_send_addr)
 {
-	char tmp[32];
-	const char *type;
-	int num;
+	int i;
 
-	if ( cc < 4 ) {
-		handle_encoder(cc+1, val, osc_send_addr);
-		return;
-	} else if ( cc<=15 ) {
-		type = "potentiometers";
-		num = cc+1;
-	} else if ( cc<=19 ) {
-		type = "faders";
-		num = cc-15;
-	} else if ( cc<=21 ) {
-		handle_encoder(cc+81, val, osc_send_addr);
-		return;
-	} else {
-		fprintf(stderr, "CC %i unrecognised!\n", cc);
-		return;
+	for ( i=0; i<n_faders; i++ ) {
+		if ( cc == faders[i].cc_val ) {
+			faderpot_cc(&faders[i], val, osc_send_addr);
+			return;
+		}
 	}
 
-	snprintf(tmp, 32, "/x1k2/%s/%i", type, num);
-	printf("sending %s = %i\n", tmp, val);
-	lo_send(osc_send_addr, tmp, "i", val);
+	for ( i=0; i<n_potentiometers; i++ ) {
+		if ( cc == potentiometers[i].cc_val ) {
+			faderpot_cc(&potentiometers[i], val, osc_send_addr);
+			return;
+		}
+	}
+
+	for ( i=0; i<n_encoders; i++ ) {
+		if ( cc == encoders[i].cc_val) {
+			encoder_cc(&encoders[i], val, osc_send_addr);
+			return;
+		}
+	}
+
+	fprintf(stderr, "Unrecognised CC %i\n", cc);
 }
 
 
@@ -409,7 +566,6 @@ int main(int argc, char *argv[])
 	int c, r, i;
 	char *dev = NULL;
 	snd_rawmidi_t *midi_in;
-	snd_rawmidi_t *midi_out;
 	lo_server osc_server;
 	lo_address osc_send_addr;
 	int lo_fd;
