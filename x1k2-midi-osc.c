@@ -181,9 +181,11 @@ static void faderpot_cc(struct faderpot *fad, int val, lo_address osc_send_addr)
 {
 	if ( !fad->congruent ) {
 		int inr = in_range(fad->pickup_value, fad->physical_value, val);
-		if ( fad->physical_value_known && inr ) {
-			fad->congruent = 1;
-		}
+		if ( fad->physical_value_known && inr ) fad->congruent = 1;
+
+		/* Special case for fader coming from zero, where we didn't
+		 * know its previous position. */
+		if ( (fad->pickup_value == 0) && (val <= 2) ) fad->congruent = 1;
 	}
 
 	if ( fad->enabled ) {
